@@ -3,10 +3,9 @@
 #include <PubSubClient.h>
 #include <ESP8266WebServer.h>
 #include <IRremoteESP8266.h>
-#include <OneWire.h>
-#include <DallasTemperature.h>
+#include <DHT.h>
 
-const char* idESP8266= "ESP8266Client";
+const char* idESP8266= "ESP8266Client1";
 
 /**
  * Flags Pins
@@ -16,6 +15,9 @@ const boolean flagRELAY2 = true;
 const boolean flagRELAY3 = true;
 const boolean flagRELAY4 = true;
 
+const boolean flagTEMP = true;
+const boolean flagHUM = true;
+
 /**
  * Configurações de Pins
  */
@@ -23,6 +25,15 @@ const int pinRELAY1 = 15;
 const int pinRELAY2 = 14;
 const int pinRELAY3 = 12;
 const int pinRELAY4 = 13;
+
+const int pinHum = A0;
+
+/* 
+ * Configurações da Temperatura 
+ */
+#define DHTPIN  2
+#define DHTTYPE DHT22
+DHT dht(DHTPIN, DHTTYPE, 11);
 
 /**
  * Configurações de Rede
@@ -43,12 +54,28 @@ PubSubClient client(espClient);
 char msg[50];
 
 /**
+ * Tempos de Atualização
+ */
+long lastTemp = 0;
+long lastHum = 0;
+
+/**
  * Chars Result
  */
 char resultRelay1[200];
 char resultRelay2[200];
 char resultRelay3[200];
 char resultRelay4[200];
+
+char resultTemp[200];
+char resultHum[200];
+
+/**
+ * Variaveis
+*/
+float temp;
+int hum;
+
 
 /**
  * Setup
@@ -70,6 +97,10 @@ void setup() {
   if(flagRELAY4){
     pinMode(pinRELAY4, OUTPUT);  
   }
+
+  if(flagHUM){
+    pinMode(pinHum, INPUT);  
+  }
   
   setup_WIFI();
   setup_MQTT();
@@ -83,6 +114,14 @@ void loop() {
     reconnect();
   }
   client.loop();
+
+  if(flagTEMP){
+    mqttTemp(resultTemp);
+  }
+
+  if(flagHUM){
+    mqttHum(resultHum);
+  }
 }
 
 /************************************ WIFI ************************************/
@@ -143,6 +182,34 @@ void Relay(String code, char* result, String topic) {
     }    
     snprintf(result, 200, "{\"relay\": LOW}");
   }
+}
+
+/**
+ * Temp
+ * @param      {char*}   result
+ */
+void Temp(char* result) {  
+  hum = dht.readHumidity();
+  temp = dht.readTemperature();  
+  
+  snprintf(result, 200, "{\"hum\": %d.%d, \"temp\": %d.%d}", (int)hum, (int)((hum - (int)hum) * 100), (int)temp, (int)((temp - (int)temp) * 100));
+}
+
+/**
+ * Hum
+ * @param      {char*}   result
+ */
+void Hum(char* result) { 
+  int moistureValue = analogRead(pinHum);
+  if(moistureValue<250) moistureValue=250;
+  if(moistureValue>750) moistureValue=750;
+  //Serial.print("moistureValue: ");  
+  //Serial.println(moistureValue);  
+  hum = 100-(((moistureValue-250))*100/500);
+  
+  //Serial.print("hum: ");
+  //Serial.println(hum);
+  snprintf(result, 200, "{\"hum\": %d}", (int)hum);
 }
 
 /************************************ MQTT ************************************/
@@ -223,4 +290,28 @@ void mqttRelay(String code, char* result, String topic) {
   }else if(flagRELAY4 && topic == "ESP8266_Relay4_send"){
     client.publish("ESP8266_Relay4", result);
   } 
+}
+
+/**
+ * mqttTemp
+ */
+void mqttTemp(char* result) {
+  long now = millis();
+  if (now - lastTemp > 10000) {
+    lastTemp = now;
+    Temp(result); 
+    client.publish("ESP8266_Temp", result);
+  }
+}
+
+/**
+ * mqttHum
+ */
+void mqttHum(char* result) {
+  long now = millis();
+  if (now - lastHum > 10000) {
+    lastHum = now;
+    Hum(result); 
+    client.publish("ESP8266_Hum", result);
+  }
 }
